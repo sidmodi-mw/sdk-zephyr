@@ -80,7 +80,7 @@ tests:
     harness_config:
       fixture: fixture_display
   sample.display.tn0216anvnann:
-    platform_allow: nrf52dk_nrf52833
+    platform_allow: nrf52dk_nrf52832
     extra_args: SHIELD=tn0216anvnann
     tags:
       - display

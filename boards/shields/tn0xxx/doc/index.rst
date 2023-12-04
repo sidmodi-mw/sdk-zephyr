@@ -22,7 +22,7 @@ Pins Assignment of the Generic Sharp memory Display Shield
 +---------------+---------------------------------------------------------+
 | SCLK          | Serial Clock Input                                      |
 +---------------+---------------------------------------------------------+
-| RST           | Reset                                     |
+| RST           | Reset                                                   |
 +---------------+---------------------------------------------------------+
 | VCOM          | VCOM Inversion Polarity Input (VCOM can be controlled   |
 |               | through SW)                                             |
