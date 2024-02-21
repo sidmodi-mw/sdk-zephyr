@@ -158,11 +158,20 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 {
 
 	const struct tn0xxx_config_s *config = dev->config;
+	static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
+					(LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE);
+
+	static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH]
+				   [1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
+				    (LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE)];
+
 	uint8_t single_line_buffer[(TN0XXX_PANEL_WIDTH + LCD_DUMMY_SPI_CYCLES_LEN_BITS +
 				    LCD_ADDRESS_LEN_BITS) /
 				   TN0XXX_PIXELS_PER_BYTE];
 
 	uint16_t bitmap_buffer_index = 0;
+	uint16_t skipped = 0;
+	uint32_t before = k_uptime_get_32();
 	for (int column_addr = start_line; column_addr < start_line + num_lines; column_addr++) {
 		uint8_t buff_index = 0;
 
@@ -176,9 +185,15 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			single_line_buffer[buff_index++] = ALL_BLACK_BYTE;
 		}
 
-		int len = sizeof(single_line_buffer);
+		if (memcmp(single_line_buffer, dirty_buffer[column_addr], line_size) != 0) {
+			memcpy(dirty_buffer[column_addr], single_line_buffer, line_size);
+		} else {
+			skipped++;
+			continue;
+		}
 
-		struct spi_buf tx_buf = {.buf = single_line_buffer, .len = len};
+		struct spi_buf tx_buf = {.buf = single_line_buffer,
+					 .len = sizeof(single_line_buffer)};
 		struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
 
 		if (spi_write_dt(&config->bus, &tx_bufs)) {
@@ -186,9 +201,15 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			return 1;
 		}
 	}
-
-	k_sleep(K_USEC(10)); // SCS low width time per datasheet
+	uint32_t after = k_uptime_get_32();
+	// k_sleep(K_USEC(10)); // SCS low width time per datasheet
 	LOG_DBG("Display update complete");
+
+	if (skipped > 0) {
+		LOG_DBG("Skipped %d / %d lines", skipped, num_lines);
+	}
+
+	LOG_INF("Display update time: %d ms", (after - before));
 
 	return 0;
 }
