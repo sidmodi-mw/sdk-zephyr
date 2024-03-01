@@ -168,25 +168,26 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 				    (LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE)];
 #endif
 
-	uint8_t single_line_buffer[(TN0XXX_PANEL_WIDTH + LCD_DUMMY_SPI_CYCLES_LEN_BITS +
+	static uint8_t single_line_buffer[16][(TN0XXX_PANEL_WIDTH + LCD_DUMMY_SPI_CYCLES_LEN_BITS +
 				    LCD_ADDRESS_LEN_BITS) /
 				   TN0XXX_PIXELS_PER_BYTE];
 
 	uint16_t bitmap_buffer_index = 0;
+	uint8_t line_index = 0;
 #if defined(CONFIG_TN0XXX_SHOW_UPDATE_RATE)
 	uint32_t before = k_uptime_get_32();
 #endif
 	for (int column_addr = start_line; column_addr < start_line + num_lines; column_addr++) {
 		uint8_t buff_index = 0;
 
-		single_line_buffer[buff_index++] = (uint8_t)column_addr;
+		single_line_buffer[line_index][buff_index++] = (uint8_t)column_addr;
 
 		for (int i = 0; i < TN0XXX_PANEL_WIDTH / TN0XXX_PIXELS_PER_BYTE; i++) {
-			single_line_buffer[buff_index++] = bitmap_buffer[bitmap_buffer_index++];
+			single_line_buffer[line_index][buff_index++] = bitmap_buffer[bitmap_buffer_index++];
 		}
 		// write 32 dummy bits
 		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
-			single_line_buffer[buff_index++] = ALL_BLACK_BYTE;
+			single_line_buffer[line_index][buff_index++] = ALL_BLACK_BYTE;
 		}
 
 #if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
@@ -196,15 +197,21 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			continue;
 		}
 #endif
+		line_index++;
 
-		struct spi_buf tx_buf = {.buf = single_line_buffer,
+		if (line_index == 16) {
+			struct spi_buf tx_buf = {.buf = single_line_buffer,
 					 .len = sizeof(single_line_buffer)};
-		struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
+			struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
 
-		if (spi_write_dt(&config->bus, &tx_bufs)) {
-			LOG_ERR("SPI write to black out screen failed\r\n");
-			return 1;
+			if (spi_write_dt(&config->bus, &tx_bufs)) {
+				LOG_ERR("SPI write to black out screen failed\r\n");
+				return 1;
+			}
+			line_index = 0;
 		}
+
+		
 	}
 
 #if defined(CONFIG_TN0XXX_SHOW_UPDATE_RATE)
