@@ -24,4 +24,16 @@ config TN0XXX_ROTATED_180_DEGREE
 	  Initialize display in portrait orientation using bitmaps aligned vertically,
 	  except that the display orientation is flipped by 180 degrees
 
+config TN0XXX_DIRTY_BUFFER
+	bool "TN0XXX uses dirty buffer"
+	default y
+	help
+	  Enable a second buffer to store the dirty area of the display which reduces the amount of data to be sent to the display
+
+config TN0XXX_SHOW_UPDATE_RATE
+	bool "TN0XXX show update rate"
+	default n
+	help
+	  Show the update rate of the display in the kernel log
+
 endif # TN0XXX

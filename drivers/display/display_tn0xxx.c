@@ -158,36 +158,66 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 {
 
 	const struct tn0xxx_config_s *config = dev->config;
-	uint8_t single_line_buffer[(TN0XXX_PANEL_WIDTH + LCD_DUMMY_SPI_CYCLES_LEN_BITS +
+
+#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
+	static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
+					(LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE);
+
+	static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH]
+				   [1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
+				    (LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE)];
+#endif
+
+	static uint8_t single_line_buffer[16][(TN0XXX_PANEL_WIDTH + LCD_DUMMY_SPI_CYCLES_LEN_BITS +
 				    LCD_ADDRESS_LEN_BITS) /
 				   TN0XXX_PIXELS_PER_BYTE];
 
 	uint16_t bitmap_buffer_index = 0;
+	uint8_t line_index = 0;
+#if defined(CONFIG_TN0XXX_SHOW_UPDATE_RATE)
+	uint32_t before = k_uptime_get_32();
+#endif
 	for (int column_addr = start_line; column_addr < start_line + num_lines; column_addr++) {
 		uint8_t buff_index = 0;
 
-		single_line_buffer[buff_index++] = (uint8_t)column_addr;
+		single_line_buffer[line_index][buff_index++] = (uint8_t)column_addr;
 
 		for (int i = 0; i < TN0XXX_PANEL_WIDTH / TN0XXX_PIXELS_PER_BYTE; i++) {
-			single_line_buffer[buff_index++] = bitmap_buffer[bitmap_buffer_index++];
+			single_line_buffer[line_index][buff_index++] = bitmap_buffer[bitmap_buffer_index++];
 		}
 		// write 32 dummy bits
 		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
-			single_line_buffer[buff_index++] = ALL_BLACK_BYTE;
+			single_line_buffer[line_index][buff_index++] = ALL_BLACK_BYTE;
 		}
 
-		int len = sizeof(single_line_buffer);
-
-		struct spi_buf tx_buf = {.buf = single_line_buffer, .len = len};
-		struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
-
-		if (spi_write_dt(&config->bus, &tx_bufs)) {
-			LOG_ERR("SPI write to black out screen failed\r\n");
-			return 1;
+#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
+		if (memcmp(single_line_buffer, dirty_buffer[column_addr], line_size) != 0) {
+			memcpy(dirty_buffer[column_addr], single_line_buffer, line_size);
+		} else {
+			continue;
 		}
+#endif
+		line_index++;
+
+		if (line_index == 16) {
+			struct spi_buf tx_buf = {.buf = single_line_buffer,
+					 .len = sizeof(single_line_buffer)};
+			struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
+
+			if (spi_write_dt(&config->bus, &tx_bufs)) {
+				LOG_ERR("SPI write to black out screen failed\r\n");
+				return 1;
+			}
+			line_index = 0;
+		}
+
+		
 	}
 
-	k_sleep(K_USEC(10)); // SCS low width time per datasheet
+#if defined(CONFIG_TN0XXX_SHOW_UPDATE_RATE)
+	LOG_INF("Display update time: %d ms", (k_uptime_get_32() - before));
+#endif
+
 	LOG_DBG("Display update complete");
 
 	return 0;
@@ -196,10 +226,10 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 static int tn0xxx_write(const struct device *dev, const uint16_t x, const uint16_t y,
 			const struct display_buffer_descriptor *desc, const void *buf)
 {
-	const struct tn0xxx_data_s *data = dev->data;
+		const struct tn0xxx_data_s *data = dev->data;
 
 	lv_disp_t *disp = lv_disp_get_default();
-	struct lvgl_disp_data *disp_data = disp->driver->user_data;
+		struct lvgl_disp_data *disp_data = disp->driver->user_data;
 	struct display_capabilities *caps = &disp_data->cap;
 
 	LOG_DBG("X: %d, Y: %d, W: %d, H: %d, pitch: %d, buf_size: %d", x, y, desc->width,
