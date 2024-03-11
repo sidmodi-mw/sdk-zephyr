@@ -44,6 +44,18 @@ LOG_MODULE_REGISTER(tn0xxx, CONFIG_DISPLAY_LOG_LEVEL);
  * +-------------------+-------------------+--------------------+
  */
 
+#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
+// Note: This is exposed on purpose to allow the application to invalidate the buffer
+bool tn0xxx_first_render = true;
+
+static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
+				(LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE);
+
+static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH]
+			   [1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
+			    (LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE)];
+#endif
+
 struct tn0xxx_config_s {
 	struct spi_dt_spec bus;
 };
@@ -158,19 +170,13 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 {
 
 	const struct tn0xxx_config_s *config = dev->config;
-
-#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
-	static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
-					(LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE);
-
-	static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH]
-				   [1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
-				    (LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE)];
-#endif
-
-	static uint8_t single_line_buffer[16][(TN0XXX_PANEL_WIDTH + LCD_DUMMY_SPI_CYCLES_LEN_BITS +
-				    LCD_ADDRESS_LEN_BITS) /
-				   TN0XXX_PIXELS_PER_BYTE];
+// Note: 11 is used because the blip-bar is 10px wide and 11 is the closest value that
+// divides evenly into 176 (11 x 16 = 176)
+#define PAINT_LINE_COUNT 11
+	static uint8_t single_line_buffer[PAINT_LINE_COUNT]
+					 [(TN0XXX_PANEL_WIDTH + LCD_DUMMY_SPI_CYCLES_LEN_BITS +
+					   LCD_ADDRESS_LEN_BITS) /
+					  TN0XXX_PIXELS_PER_BYTE];
 
 	uint16_t bitmap_buffer_index = 0;
 	uint8_t line_index = 0;
@@ -183,7 +189,8 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 		single_line_buffer[line_index][buff_index++] = (uint8_t)column_addr;
 
 		for (int i = 0; i < TN0XXX_PANEL_WIDTH / TN0XXX_PIXELS_PER_BYTE; i++) {
-			single_line_buffer[line_index][buff_index++] = bitmap_buffer[bitmap_buffer_index++];
+			single_line_buffer[line_index][buff_index++] =
+				bitmap_buffer[bitmap_buffer_index++];
 		}
 		// write 32 dummy bits
 		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
@@ -191,7 +198,8 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 		}
 
 #if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
-		if (memcmp(single_line_buffer, dirty_buffer[column_addr], line_size) != 0) {
+		if (memcmp(single_line_buffer, dirty_buffer[column_addr], line_size) != 0 ||
+		    tn0xxx_first_render) {
 			memcpy(dirty_buffer[column_addr], single_line_buffer, line_size);
 		} else {
 			continue;
@@ -199,9 +207,9 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 #endif
 		line_index++;
 
-		if (line_index == 16) {
+		if (line_index == PAINT_LINE_COUNT) {
 			struct spi_buf tx_buf = {.buf = single_line_buffer,
-					 .len = sizeof(single_line_buffer)};
+						 .len = sizeof(single_line_buffer)};
 			struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
 
 			if (spi_write_dt(&config->bus, &tx_bufs)) {
@@ -210,9 +218,10 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			}
 			line_index = 0;
 		}
-
-		
 	}
+#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
+	tn0xxx_first_render = false;
+#endif
 
 #if defined(CONFIG_TN0XXX_SHOW_UPDATE_RATE)
 	LOG_INF("Display update time: %d ms", (k_uptime_get_32() - before));
@@ -226,10 +235,10 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 static int tn0xxx_write(const struct device *dev, const uint16_t x, const uint16_t y,
 			const struct display_buffer_descriptor *desc, const void *buf)
 {
-		const struct tn0xxx_data_s *data = dev->data;
+	const struct tn0xxx_data_s *data = dev->data;
 
 	lv_disp_t *disp = lv_disp_get_default();
-		struct lvgl_disp_data *disp_data = disp->driver->user_data;
+	struct lvgl_disp_data *disp_data = disp->driver->user_data;
 	struct display_capabilities *caps = &disp_data->cap;
 
 	LOG_DBG("X: %d, Y: %d, W: %d, H: %d, pitch: %d, buf_size: %d", x, y, desc->width,
