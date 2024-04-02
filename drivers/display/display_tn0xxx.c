@@ -222,6 +222,20 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			line_index = 0;
 		}
 	}
+
+	// Incase less than 11 lines have changed we need to flush the remaining lines
+	if (line_index > 0) {
+		struct spi_buf tx_buf = {.buf = single_line_buffer,
+					 .len = sizeof(single_line_buffer[0]) * line_index};
+		struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
+
+		if (spi_write_dt(&config->bus, &tx_bufs)) {
+			LOG_ERR("SPI write to black out screen failed\r\n");
+			return 1;
+		}
+		line_index = 0;
+	}
+
 #if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
 	tn0xxx_first_render = false;
 #endif
