@@ -134,6 +134,11 @@ static int tn0xxx_set_orientation(const struct device *dev,
 	}
 	caps->x_resolution = disp->driver->hor_res;
 	caps->y_resolution = disp->driver->ver_res;
+
+#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
+	tn0xxx_first_render = true;
+#endif
+
 	lv_disp_drv_update(disp, disp->driver);
 	data->orientation = new_orientation;
 	lv_obj_invalidate(lv_scr_act());
