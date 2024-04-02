@@ -48,12 +48,9 @@ LOG_MODULE_REGISTER(tn0xxx, CONFIG_DISPLAY_LOG_LEVEL);
 // Note: This is exposed on purpose to allow the application to invalidate the buffer
 bool tn0xxx_first_render = true;
 
-static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
-				(LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE);
+static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE);
 
-static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH]
-			   [1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
-			    (LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE)];
+static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH][1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE)];
 #endif
 
 struct tn0xxx_config_s {
@@ -192,10 +189,6 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			single_line_buffer[line_index][buff_index++] =
 				bitmap_buffer[bitmap_buffer_index++];
 		}
-		// write 32 dummy bits
-		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
-			single_line_buffer[line_index][buff_index++] = ALL_BLACK_BYTE;
-		}
 
 #if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
 		if (memcmp(single_line_buffer, dirty_buffer[column_addr], line_size) != 0 ||
@@ -205,6 +198,11 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			continue;
 		}
 #endif
+		// write 32 dummy bits
+		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
+			single_line_buffer[line_index][buff_index++] = ALL_BLACK_BYTE;
+		}
+
 		line_index++;
 
 		if (line_index == PAINT_LINE_COUNT) {
