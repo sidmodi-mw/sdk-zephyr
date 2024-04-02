@@ -48,12 +48,9 @@ LOG_MODULE_REGISTER(tn0xxx, CONFIG_DISPLAY_LOG_LEVEL);
 // Note: This is exposed on purpose to allow the application to invalidate the buffer
 bool tn0xxx_first_render = true;
 
-static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
-				(LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE);
+static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE);
 
-static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH]
-			   [1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE) +
-			    (LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE)];
+static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH][1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE)];
 #endif
 
 struct tn0xxx_config_s {
@@ -137,6 +134,11 @@ static int tn0xxx_set_orientation(const struct device *dev,
 	}
 	caps->x_resolution = disp->driver->hor_res;
 	caps->y_resolution = disp->driver->ver_res;
+
+#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
+	tn0xxx_first_render = true;
+#endif
+
 	lv_disp_drv_update(disp, disp->driver);
 	data->orientation = new_orientation;
 	lv_obj_invalidate(lv_scr_act());
@@ -192,10 +194,6 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			single_line_buffer[line_index][buff_index++] =
 				bitmap_buffer[bitmap_buffer_index++];
 		}
-		// write 32 dummy bits
-		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
-			single_line_buffer[line_index][buff_index++] = ALL_BLACK_BYTE;
-		}
 
 #if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
 		if (memcmp(single_line_buffer, dirty_buffer[column_addr], line_size) != 0 ||
@@ -205,6 +203,11 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			continue;
 		}
 #endif
+		// write 32 dummy bits
+		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
+			single_line_buffer[line_index][buff_index++] = ALL_BLACK_BYTE;
+		}
+
 		line_index++;
 
 		if (line_index == PAINT_LINE_COUNT) {
@@ -219,6 +222,20 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 			line_index = 0;
 		}
 	}
+
+	// Incase less than 11 lines have changed we need to flush the remaining lines
+	if (line_index > 0) {
+		struct spi_buf tx_buf = {.buf = single_line_buffer,
+					 .len = sizeof(single_line_buffer[0]) * line_index};
+		struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
+
+		if (spi_write_dt(&config->bus, &tx_bufs)) {
+			LOG_ERR("SPI write to black out screen failed\r\n");
+			return 1;
+		}
+		line_index = 0;
+	}
+
 #if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
 	tn0xxx_first_render = false;
 #endif
