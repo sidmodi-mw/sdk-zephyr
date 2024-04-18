@@ -48,9 +48,7 @@ LOG_MODULE_REGISTER(tn0xxx, CONFIG_DISPLAY_LOG_LEVEL);
 // Note: This is exposed on purpose to allow the application to invalidate the buffer
 bool tn0xxx_first_render = true;
 
-static const size_t line_size = 1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE);
-
-static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH][1 + (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE)];
+static uint8_t dirty_buffer[TN0XXX_PANEL_WIDTH * (TN0XXX_PANEL_HEIGHT / TN0XXX_PIXELS_PER_BYTE)];
 #endif
 
 struct tn0xxx_config_s {
@@ -188,6 +186,33 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 	for (int column_addr = start_line; column_addr < start_line + num_lines; column_addr++) {
 		uint8_t buff_index = 0;
 
+#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
+		bool paint_line = false;
+		// loop over all the bytes in this line
+		if (tn0xxx_first_render) {
+			paint_line = true;
+		} else {
+			for (int i = 0; i < TN0XXX_PANEL_WIDTH / TN0XXX_PIXELS_PER_BYTE; i++) {
+				// when the first byte is not the same as the dirty buffer, we need
+				// to push the line to be painted
+				if (bitmap_buffer[bitmap_buffer_index + i] !=
+				    dirty_buffer[bitmap_buffer_index + i]) {
+					paint_line = true;
+					break;
+				}
+			}
+		}
+
+		if (!paint_line) {
+			bitmap_buffer_index += TN0XXX_PANEL_WIDTH / TN0XXX_PIXELS_PER_BYTE;
+			continue;
+		} else {
+			memcpy(&dirty_buffer[bitmap_buffer_index],
+			       &bitmap_buffer[bitmap_buffer_index],
+			       TN0XXX_PANEL_WIDTH / TN0XXX_PIXELS_PER_BYTE);
+		}
+#endif
+
 		single_line_buffer[line_index][buff_index++] = (uint8_t)column_addr;
 
 		for (int i = 0; i < TN0XXX_PANEL_WIDTH / TN0XXX_PIXELS_PER_BYTE; i++) {
@@ -195,14 +220,6 @@ static int update_display(const struct device *dev, uint16_t start_line, uint16_
 				bitmap_buffer[bitmap_buffer_index++];
 		}
 
-#if defined(CONFIG_TN0XXX_DIRTY_BUFFER)
-		if (memcmp(single_line_buffer, dirty_buffer[column_addr], line_size) != 0 ||
-		    tn0xxx_first_render) {
-			memcpy(dirty_buffer[column_addr], single_line_buffer, line_size);
-		} else {
-			continue;
-		}
-#endif
 		// write 32 dummy bits
 		for (int i = 0; i < LCD_DUMMY_SPI_CYCLES_LEN_BITS / TN0XXX_PIXELS_PER_BYTE; i++) {
 			single_line_buffer[line_index][buff_index++] = ALL_BLACK_BYTE;
